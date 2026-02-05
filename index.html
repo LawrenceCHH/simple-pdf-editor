@@ -395,6 +395,11 @@
     let singleSourceName = '';
     let mergeBaseName = '';
 
+    // pdf.js 渲染控制（防止同一 canvas 多重 render）
+    let currentRenderTask = null;
+    let isRendering = false;
+    let renderToken = 0;
+
     // 切換工具
     toolTabs.forEach(btn => {
       btn.addEventListener('click', () => {
@@ -453,8 +458,18 @@
 
     // 用 bytes 建立預覽；updatePageInfoOnlyForOriginal = 是否更新 totalPages
     async function loadPreviewFromBytes(bytes, updatePageInfoOnlyForOriginal = false) {
+      // 先取消目前的 render
+      if (currentRenderTask && isRendering) {
+        try {
+          currentRenderTask.cancel();
+        } catch (e) {
+          console.warn('cancel previous render failed', e);
+        }
+      }
+
       if (!bytes) {
         pdfDocForPreview = null;
+        totalPages = updatePageInfoOnlyForOriginal ? 0 : totalPages;
         resetPreview();
         updateRunButtonState();
         return;
@@ -466,7 +481,6 @@
 
       try {
         pdfDocForPreview = await pdfjsLib.getDocument({ data: previewBytes }).promise;
-        // 只有在載入「原始檔」時才更新 totalPages
         if (updatePageInfoOnlyForOriginal) {
           totalPages = pdfDocForPreview.numPages;
         }
@@ -484,6 +498,71 @@
       updateRunButtonState();
     }
 
+    function resetPreview() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      pageInfo.textContent = '第 - / - 頁';
+      prevPageBtn.disabled = true;
+      nextPageBtn.disabled = true;
+    }
+
+    // 單頁渲染（具取消與競態控制）
+    async function renderPreviewPage() {
+      if (!pdfDocForPreview) {
+        resetPreview();
+        return;
+      }
+
+      const myToken = ++renderToken;
+
+      // 取消先前 render
+      if (currentRenderTask && isRendering) {
+        try {
+          currentRenderTask.cancel();
+        } catch (e) {
+          console.warn('cancel previous render failed', e);
+        }
+      }
+
+      isRendering = true;
+
+      try {
+        const page = await pdfDocForPreview.getPage(currentPageNum);
+
+        // 在等待過程中可能已換文件
+        if (!pdfDocForPreview || myToken !== renderToken) {
+          isRendering = false;
+          return;
+        }
+
+        const viewport = page.getViewport({ scale: 1.2 });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        const renderContext = { canvasContext: ctx, viewport };
+        currentRenderTask = page.render(renderContext);
+
+        await currentRenderTask.promise;
+
+        if (!pdfDocForPreview || myToken !== renderToken) {
+          isRendering = false;
+          return;
+        }
+
+        pageInfo.textContent = `第 ${currentPageNum} / ${pdfDocForPreview.numPages} 頁`;
+        prevPageBtn.disabled = currentPageNum <= 1;
+        nextPageBtn.disabled = currentPageNum >= pdfDocForPreview.numPages;
+      } catch (err) {
+        // 被 cancel 的情況會丟 RenderingCancelledException，可忽略
+        if (!err || err.name !== 'RenderingCancelledException') {
+          console.error(err);
+        }
+      } finally {
+        if (myToken === renderToken) {
+          isRendering = false;
+        }
+      }
+    }
+
     // 載入單一檔案，設定 originalPdfBytes 與 totalPages
     fileInput.addEventListener('change', async (e) => {
       const file = e.target.files[0];
@@ -496,7 +575,7 @@
       if (!file) {
         originalPdfBytes = null;
         singleSourceName = '';
-        await loadPreviewFromBytes(null);
+        await loadPreviewFromBytes(null, true);
         return;
       }
 
@@ -510,32 +589,6 @@
       // 載入原始檔到預覽，並更新 totalPages
       await loadPreviewFromBytes(originalPdfBytes, true);
     });
-
-    function resetPreview() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      pageInfo.textContent = '第 - / - 頁';
-      prevPageBtn.disabled = true;
-      nextPageBtn.disabled = true;
-    }
-
-    async function renderPreviewPage() {
-      if (!pdfDocForPreview) {
-        resetPreview();
-        return;
-      }
-
-      const page = await pdfDocForPreview.getPage(currentPageNum);
-      const viewport = page.getViewport({ scale: 1.2 });
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-
-      const renderContext = { canvasContext: ctx, viewport };
-      await page.render(renderContext).promise;
-
-      pageInfo.textContent = `第 ${currentPageNum} / ${pdfDocForPreview.numPages} 頁`;
-      prevPageBtn.disabled = currentPageNum <= 1;
-      nextPageBtn.disabled = currentPageNum >= pdfDocForPreview.numPages;
-    }
 
     prevPageBtn.addEventListener('click', () => {
       if (!pdfDocForPreview || currentPageNum <= 1) return;
@@ -588,7 +641,7 @@
       if (!mergeFiles.length) {
         mergedPreviewBytes = null;
         mergeBaseName = '';
-        await loadPreviewFromBytes(null);
+        await loadPreviewFromBytes(null, false);
         updateRunButtonState();
         return;
       }
@@ -616,7 +669,7 @@
         console.error(err);
         alert('合併預覽時發生錯誤，請檢查 console。');
         mergedPreviewBytes = null;
-        await loadPreviewFromBytes(null);
+        await loadPreviewFromBytes(null, false);
       }
 
       updateRunButtonState();
@@ -726,6 +779,7 @@
       }
     }
 
+    // 這裡如果要更穩，可以加 debounce；先照原本即時觸發
     rotatePagesInput.addEventListener('input', async () => {
       if (!originalPdfBytes) return;
       await previewRotate();
