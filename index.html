@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <title>簡單 PDF 工具：旋轉 / 取出 / 合併</title>
+
+  <!-- PDF.js：只負責預覽 -->
+  <script src="./pdf.min.js"></script>
+  <!-- pdf-lib：負責旋轉 / 取出 / 合併 -->
+  <script src="./pdf-lib.min.js"></script>
+
+  <style>
+    :root {
+      --primary: #2563eb;
+      --border: #e5e7eb;
+      --bg: #f9fafb;
+      --text-muted: #6b7280;
+      --danger: #dc2626;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: var(--bg);
+      color: #111827;
+    }
+
+    h1 { margin: 0 0 16px; font-size: 22px; }
+    p.subtitle { margin: 0 0 24px; font-size: 13px; color: var(--text-muted); }
+
+    .app {
+      max-width: 1040px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 20px;
+      box-shadow: 0 10px 25px rgba(15, 23, 42, 0.05);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+      gap: 24px;
+    }
+    @media (max-width: 880px) {
+      .layout { grid-template-columns: minmax(0, 1fr); }
+    }
+
+    .panel {
+      padding: 16px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #fff;
+    }
+
+    .panel-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+    .panel-desc { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+
+    .step { margin-bottom: 16px; }
+    .step-label { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+    .step-hint { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+    .file-input {
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px dashed var(--border);
+      background: #f9fafb;
+      font-size: 12px;
+      cursor: pointer;
+      gap: 8px;
+    }
+    .file-input input { display: none; }
+    .file-name { font-size: 12px; color: var(--text-muted); margin-top: 4px; word-break: break-all; }
+
+    .tool-tabs {
+      display: flex;
+      border-radius: 999px;
+      background: #f3f4f6;
+      padding: 3px;
+      gap: 4px;
+      margin-bottom: 4px;
+    }
+    .tool-tab {
+      flex: 1;
+      text-align: center;
+      font-size: 12px;
+      padding: 6px 0;
+      border-radius: 999px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      color: var(--text-muted);
+    }
+    .tool-tab.active {
+      background: #fff;
+      color: #111827;
+      box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.5);
+    }
+
+    .field-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 6px;
+    }
+    .field-row label { font-size: 12px; }
+
+    input[type="text"], select {
+      font-size: 12px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      min-width: 140px;
+      max-width: 180px;
+    }
+
+    .primary-btn {
+      font-size: 13px;
+      padding: 7px 14px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--primary);
+      color: #fff;
+    }
+    .primary-btn:disabled {
+      background: #9ca3af;
+      cursor: not-allowed;
+    }
+
+    .preview-panel {
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #f9fafb;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .preview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .pager {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .pager button {
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #fff;
+      font-size: 11px;
+      padding: 3px 8px;
+      cursor: pointer;
+    }
+    .pager button:disabled {
+      cursor: not-allowed;
+      opacity: 0.4;
+    }
+    .page-info { font-size: 12px; }
+
+    #previewCanvas {
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      max-width: 100%;
+      display: block;
+      background: #fff;
+    }
+
+    .hint-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #4f46e5;
+    }
+
+    .group-label {
+      font-size: 12px;
+      font-weight: 600;
+      margin-top: 10px;
+      margin-bottom: 4px;
+    }
+
+    /* 合併檔案清單 */
+    .merge-list {
+      list-style: none;
+      padding: 0;
+      margin: 6px 0 0;
+      max-height: 120px;
+      overflow-y: auto;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #f9fafb;
+    }
+    .merge-list-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 8px;
+      font-size: 12px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .merge-list-item:last-child {
+      border-bottom: none;
+    }
+    .merge-list-name {
+      flex: 1;
+      margin-right: 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .merge-list-remove {
+      border: none;
+      background: transparent;
+      color: var(--danger);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>簡單 PDF 工具</h1>
+    <p class="subtitle">三件事：旋轉頁面、取出頁面、合併多個檔案。全部在瀏覽器本機完成，不上傳檔案。</p>
+
+    <div class="layout">
+      <!-- 左側：操作步驟 -->
+      <div class="panel">
+        <div class="panel-title">步驟 1：選擇工具</div>
+        <div class="panel-desc">先選你要做的事，再選檔案、設定頁碼，就可以直接下載結果。</div>
+
+        <div class="step">
+          <div class="tool-tabs">
+            <button class="tool-tab active" data-tool="rotate">旋轉頁面</button>
+            <button class="tool-tab" data-tool="extract">取出頁面</button>
+            <button class="tool-tab" data-tool="merge">合併多檔</button>
+          </div>
+        </div>
+
+        <!-- 單一檔案 -->
+        <div class="step" id="singleFileStep">
+          <div class="step-label">步驟 2：選擇 PDF 檔案</div>
+          <label class="file-input">
+            <span>選擇單一 PDF 檔案</span>
+            <input type="file" id="fileInput" accept="application/pdf">
+          </label>
+          <div class="file-name" id="singleFileName">尚未選擇檔案</div>
+          <div class="step-hint">此檔將用於預覽以及旋轉 / 取出頁面。</div>
+        </div>
+
+        <!-- 多檔合併 -->
+        <div class="step" id="mergeFileStep" style="display:none;">
+          <div class="step-label">步驟 2：選擇要合併的檔案</div>
+          <label class="file-input">
+            <span>新增要合併的 PDF 檔案</span>
+            <input type="file" id="mergeFileInput" accept="application/pdf" multiple>
+          </label>
+          <div class="step-hint">
+            可以多次選檔，每次會將新選擇的檔案加到清單，右側預覽顯示合併後結果。
+          </div>
+          <ul class="merge-list" id="mergeFileList" style="display:none;"></ul>
+        </div>
+
+        <!-- 旋轉設定 -->
+        <div class="step" id="rotateOptions">
+          <div class="group-label">旋轉設定</div>
+          <div class="field-row">
+            <label>要旋轉的頁碼：</label>
+            <input type="text" id="rotatePagesInput" placeholder="空白＝全部，例如 1,3,5">
+          </div>
+          <div class="field-row">
+            <label>旋轉角度：</label>
+            <select id="rotationSelect">
+              <option value="90">順時針 90°</option>
+              <option value="-90">逆時針 90°</option>
+              <option value="180">180°</option>
+            </select>
+          </div>
+          <div class="step-hint">先在右邊預覽確認頁碼，再設定要旋轉的頁碼與角度。</div>
+        </div>
+
+        <!-- 取出設定 -->
+        <div class="step" id="extractOptions" style="display:none;">
+          <div class="group-label">取出頁面設定</div>
+          <div class="field-row">
+            <label>要取出的頁碼：</label>
+            <input type="text" id="extractPagesInput" placeholder="空白＝全部，例如 2,5,6">
+          </div>
+          <div class="step-hint">會依輸入頁碼順序，生成只包含這些頁面的新 PDF。</div>
+        </div>
+
+        <!-- 合併設定 -->
+        <div class="step" id="mergeOptions" style="display:none;">
+          <div class="group-label">合併設定</div>
+          <div class="step-hint">清單中的檔案會依順序合併，預覽即為合併後的結果。</div>
+        </div>
+
+        <!-- 執行 -->
+        <div class="step">
+          <div class="step-label">步驟 4：執行並下載</div>
+          <div class="field-row">
+            <button class="primary-btn" id="runActionBtn" disabled>
+              <span id="runActionLabel">旋轉並下載新 PDF</span>
+            </button>
+          </div>
+          <div class="step-hint">
+            檔名格式為：[原檔名]_[動作].pdf（例如 mydoc_rotated.pdf、mydoc_extracted.pdf、first_merged.pdf）。
+          </div>
+        </div>
+      </div>
+
+      <!-- 右側：預覽 -->
+      <div class="preview-panel">
+        <div class="preview-header">
+          <div><span style="font-size:13px;font-weight:600;">檔案預覽</span></div>
+          <div class="pager">
+            <button id="prevPageBtn" disabled>上一頁</button>
+            <span class="page-info" id="pageInfo">第 - / - 頁</span>
+            <button id="nextPageBtn" disabled>下一頁</button>
+          </div>
+        </div>
+        <div class="preview-header">
+          <span class="hint-badge">
+            旋轉 / 取出：預覽單一檔案。合併：預覽已合併好的結果。
+          </span>
+        </div>
+        <canvas id="previewCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // PDF.js worker 設定 [web:41]
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "./pdf.worker.min.js";
+
+    // DOM
+    const toolTabs = Array.from(document.querySelectorAll('.tool-tab'));
+    const runActionBtn = document.getElementById('runActionBtn');
+    const runActionLabel = document.getElementById('runActionLabel');
+
+    const singleFileStep = document.getElementById('singleFileStep');
+    const mergeFileStep = document.getElementById('mergeFileStep');
+
+    const rotateOptions = document.getElementById('rotateOptions');
+    const extractOptions = document.getElementById('extractOptions');
+    const mergeOptions = document.getElementById('mergeOptions');
+
+    const fileInput = document.getElementById('fileInput');
+    const mergeFileInput = document.getElementById('mergeFileInput');
+
+    const singleFileName = document.getElementById('singleFileName');
+    const mergeFileList = document.getElementById('mergeFileList');
+
+    const rotatePagesInput = document.getElementById('rotatePagesInput');
+    const extractPagesInput = document.getElementById('extractPagesInput');
+    const rotationSelect = document.getElementById('rotationSelect');
+
+    const prevPageBtn = document.getElementById('prevPageBtn');
+    const nextPageBtn = document.getElementById('nextPageBtn');
+    const pageInfo = document.getElementById('pageInfo');
+    const canvas = document.getElementById('previewCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // 狀態
+    let currentTool = 'rotate';           // rotate | extract | merge
+    let pdfDocForPreview = null;          // PDF.js document
+    let originalPdfBytes = null;          // 單一檔操作用 bytes
+    let mergedPreviewBytes = null;        // 合併結果 bytes（預覽＋下載）
+    let currentPageNum = 1;
+    let totalPages = 0;
+
+    // 合併來源檔案（File 陣列）
+    let mergeFiles = [];
+    let singleSourceName = '';            // 單一檔：原始檔名（不含副檔名）
+    let mergeBaseName = '';               // 合併：以第一個檔名為 base
+
+    // 工具切換
+    toolTabs.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tool = btn.getAttribute('data-tool');
+        if (tool === currentTool) return;
+        currentTool = tool;
+        updateToolUI();
+      });
+    });
+
+    function updateToolUI() {
+      toolTabs.forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-tool') === currentTool);
+      });
+
+      if (currentTool === 'merge') {
+        singleFileStep.style.display = 'none';
+        rotateOptions.style.display = 'none';
+        extractOptions.style.display = 'none';
+        mergeFileStep.style.display = '';
+        mergeOptions.style.display = '';
+      } else if (currentTool === 'rotate') {
+        singleFileStep.style.display = '';
+        rotateOptions.style.display = '';
+        extractOptions.style.display = 'none';
+        mergeFileStep.style.display = 'none';
+        mergeOptions.style.display = 'none';
+      } else { // extract
+        singleFileStep.style.display = '';
+        rotateOptions.style.display = 'none';
+        extractOptions.style.display = '';
+        mergeFileStep.style.display = 'none';
+        mergeOptions.style.display = 'none';
+      }
+
+      if (currentTool === 'rotate') {
+        runActionLabel.textContent = '旋轉並下載新 PDF';
+      } else if (currentTool === 'extract') {
+        runActionLabel.textContent = '取出頁面並下載';
+      } else {
+        runActionLabel.textContent = '合併並下載新 PDF';
+      }
+
+      updateRunButtonState();
+    }
+
+    function updateRunButtonState() {
+      if (currentTool === 'merge') {
+        runActionBtn.disabled = !mergedPreviewBytes;
+      } else {
+        runActionBtn.disabled = !originalPdfBytes;
+      }
+    }
+
+    // 共用：用 bytes 建立預覽
+    async function loadPreviewFromBytes(bytes) {
+      if (!bytes) {
+        pdfDocForPreview = null;
+        resetPreview();
+        updateRunButtonState();
+        return;
+      }
+
+      const previewBytes = new Uint8Array(
+        bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+      );
+
+      try {
+        pdfDocForPreview = await pdfjsLib.getDocument({ data: previewBytes }).promise;
+        totalPages = pdfDocForPreview.numPages;
+        currentPageNum = 1;
+        prevPageBtn.disabled = false;
+        nextPageBtn.disabled = false;
+        await renderPreviewPage();
+      } catch (err) {
+        console.error(err);
+        alert('預覽 PDF 時發生錯誤，請確認檔案是否為有效 PDF。');
+        pdfDocForPreview = null;
+        resetPreview();
+      }
+
+      updateRunButtonState();
+    }
+
+    // 單一檔案：載入 + 記錄檔名
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      singleFileName.textContent = file ? file.name : '尚未選擇檔案';
+
+      if (!file) {
+        originalPdfBytes = null;
+        singleSourceName = '';
+        await loadPreviewFromBytes(null);
+        return;
+      }
+
+      const fullName = file.name || '';
+      singleSourceName = fullName.endsWith('.pdf')
+        ? fullName.slice(0, -4)
+        : fullName;
+
+      const buffer = await file.arrayBuffer();
+      originalPdfBytes = new Uint8Array(buffer);
+      mergedPreviewBytes = null;
+      await loadPreviewFromBytes(originalPdfBytes);
+    });
+
+    function resetPreview() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      pageInfo.textContent = '第 - / - 頁';
+      prevPageBtn.disabled = true;
+      nextPageBtn.disabled = true;
+    }
+
+    async function renderPreviewPage() {
+      if (!pdfDocForPreview) {
+        resetPreview();
+        return;
+      }
+
+      const page = await pdfDocForPreview.getPage(currentPageNum);
+      const viewport = page.getViewport({ scale: 1.2 });
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      const renderContext = { canvasContext: ctx, viewport };
+      await page.render(renderContext).promise;
+
+      pageInfo.textContent = `第 ${currentPageNum} / ${totalPages} 頁`;
+      prevPageBtn.disabled = currentPageNum <= 1;
+      nextPageBtn.disabled = currentPageNum >= totalPages;
+    }
+
+    prevPageBtn.addEventListener('click', () => {
+      if (!pdfDocForPreview || currentPageNum <= 1) return;
+      currentPageNum--;
+      renderPreviewPage();
+    });
+
+    nextPageBtn.addEventListener('click', () => {
+      if (!pdfDocForPreview || currentPageNum >= totalPages) return;
+      currentPageNum++;
+      renderPreviewPage();
+    });
+
+    // 渲染合併清單 UI
+    function renderMergeList() {
+      mergeFileList.innerHTML = '';
+      if (!mergeFiles.length) {
+        mergeFileList.style.display = 'none';
+        return;
+      }
+      mergeFileList.style.display = '';
+
+      mergeFiles.forEach((file, index) => {
+        const li = document.createElement('li');
+        li.className = 'merge-list-item';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'merge-list-name';
+        nameSpan.textContent = file.name;
+
+        const btn = document.createElement('button');
+        btn.className = 'merge-list-remove';
+        btn.type = 'button';
+        btn.textContent = '✕';
+        btn.title = '從清單中移除';
+        btn.addEventListener('click', async () => {
+          // 從陣列移除這個檔案
+          mergeFiles.splice(index, 1);
+          await recomputeMergePreview();
+          renderMergeList();
+        });
+
+        li.appendChild(nameSpan);
+        li.appendChild(btn);
+        mergeFileList.appendChild(li);
+      });
+    }
+
+    // 重新合併 mergeFiles → mergedPreviewBytes → 更新預覽
+    async function recomputeMergePreview() {
+      if (!mergeFiles.length) {
+        mergedPreviewBytes = null;
+        mergeBaseName = '';
+        await loadPreviewFromBytes(null);
+        updateRunButtonState();
+        return;
+      }
+
+      // 以第一個檔名為 base
+      const firstName = mergeFiles[0].name || '';
+      mergeBaseName = firstName.endsWith('.pdf')
+        ? firstName.slice(0, -4)
+        : firstName;
+
+      try {
+        const mergedPdf = await PDFLib.PDFDocument.create();
+
+        for (const file of mergeFiles) {
+          const buffer = await file.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          const srcPdf = await PDFLib.PDFDocument.load(bytes);
+          const indices = srcPdf.getPageIndices();
+          const copiedPages = await mergedPdf.copyPages(srcPdf, indices);
+          copiedPages.forEach(p => mergedPdf.addPage(p));
+        }
+
+        mergedPreviewBytes = await mergedPdf.save();
+        originalPdfBytes = null;
+        await loadPreviewFromBytes(mergedPreviewBytes);
+      } catch (err) {
+        console.error(err);
+        alert('合併預覽時發生錯誤，請檢查 console。');
+        mergedPreviewBytes = null;
+        await loadPreviewFromBytes(null);
+      }
+
+      updateRunButtonState();
+    }
+
+    // 多檔合併：選檔（追加到陣列） [web:86][web:88]
+    mergeFileInput.addEventListener('change', async (e) => {
+      const newFiles = Array.from(e.target.files || []);
+      if (newFiles.length) {
+        mergeFiles = mergeFiles.concat(newFiles);
+      }
+      // 清掉 input 的值，避免同一批檔案無法再次選取
+      mergeFileInput.value = '';
+
+      await recomputeMergePreview();
+      renderMergeList();
+    });
+
+    // 解析頁碼字串（1-based）
+    function parsePageNumbers(inputStr, maxPage) {
+      if (!inputStr || !inputStr.trim()) {
+        const all = [];
+        for (let i = 1; i <= maxPage; i++) all.push(i);
+        return all;
+      }
+      const parts = inputStr.split(',');
+      const result = [];
+      for (const p of parts) {
+        const n = parseInt(p.trim(), 10);
+        if (!Number.isNaN(n) && n >= 1 && n <= maxPage) {
+          result.push(n);
+        }
+      }
+      return Array.from(new Set(result)).sort((a, b) => a - b);
+    }
+
+    // 建檔名：[原檔名]_[action].pdf
+    function buildFileName(action) {
+      if (currentTool === 'merge') {
+        const base = mergeBaseName || 'merged';
+        return `${base}_${action}.pdf`;
+      }
+      const base = singleSourceName || 'output';
+      return `${base}_${action}.pdf`;
+    }
+
+    // 主按鈕
+    runActionBtn.addEventListener('click', async () => {
+      if (currentTool === 'rotate') {
+        await doRotate();
+      } else if (currentTool === 'extract') {
+        await doExtract();
+      } else {
+        await doMergeDownload();
+      }
+    });
+
+    // 旋轉
+    async function doRotate() {
+      if (!originalPdfBytes) return;
+
+      const pagesToRotate = parsePageNumbers(rotatePagesInput.value, totalPages);
+      if (!pagesToRotate.length) {
+        alert('頁碼輸入無效，請確認。');
+        return;
+      }
+
+      try {
+        const pdfDoc = await PDFLib.PDFDocument.load(originalPdfBytes);
+        const pages = pdfDoc.getPages();
+        const total = pages.length;
+        const rotationDelta = parseInt(rotationSelect.value, 10);
+
+        pagesToRotate.forEach((pageNum1based) => {
+          const index = pageNum1based - 1;
+          if (index < 0 || index >= total) return;
+          const page = pages[index];
+          const currentRotation = page.getRotation().angle || 0;
+          let newRotation = (currentRotation + rotationDelta) % 360;
+          if (newRotation < 0) newRotation += 360;
+          page.setRotation(PDFLib.degrees(newRotation));
+        });
+
+        const newPdfBytes = await pdfDoc.save();
+        triggerDownload(newPdfBytes, buildFileName('rotated'));
+      } catch (err) {
+        console.error(err);
+        alert('旋轉或儲存時發生錯誤，請檢查 console。');
+      }
+    }
+
+    // 取出
+    async function doExtract() {
+      if (!originalPdfBytes) return;
+
+      const pagesToKeep = parsePageNumbers(extractPagesInput.value, totalPages);
+      if (!pagesToKeep.length) {
+        alert('頁碼輸入無效，請確認。');
+        return;
+      }
+
+      try {
+        const srcPdf = await PDFLib.PDFDocument.load(originalPdfBytes);
+        const newPdf = await PDFLib.PDFDocument.create();
+
+        const indices = pagesToKeep.map(n => n - 1);
+        const copiedPages = await newPdf.copyPages(srcPdf, indices);
+        copiedPages.forEach(p => newPdf.addPage(p));
+
+        const newBytes = await newPdf.save();
+        triggerDownload(newBytes, buildFileName('extracted'));
+      } catch (err) {
+        console.error(err);
+        alert('取出頁面時發生錯誤，請檢查 console。');
+      }
+    }
+
+    // 合併下載（使用 mergedPreviewBytes）
+    async function doMergeDownload() {
+      if (!mergedPreviewBytes) return;
+      triggerDownload(mergedPreviewBytes, buildFileName('merged'));
+    }
+
+    function triggerDownload(bytes, filename) {
+      const blob = new Blob([bytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    // 初始化
+    updateToolUI();
+  </script>
+</body>
+</html>
