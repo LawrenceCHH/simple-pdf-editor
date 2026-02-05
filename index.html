@@ -296,7 +296,7 @@
               <option value="180">180°</option>
             </select>
           </div>
-          <div class="step-hint">先在右邊預覽確認頁碼，再設定要旋轉的頁碼與角度。</div>
+          <div class="step-hint">輸入頁碼或變更角度後，右側會即時預覽旋轉後的結果。</div>
         </div>
 
         <!-- 取出設定 -->
@@ -306,7 +306,7 @@
             <label>要取出的頁碼：</label>
             <input type="text" id="extractPagesInput" placeholder="空白＝全部，例如 2,5,6">
           </div>
-          <div class="step-hint">會依輸入頁碼順序，生成只包含這些頁面的新 PDF。</div>
+          <div class="step-hint">輸入頁碼後，右側會即時預覽只包含這些頁面的新 PDF。</div>
         </div>
 
         <!-- 合併設定 -->
@@ -341,7 +341,7 @@
         </div>
         <div class="preview-header">
           <span class="hint-badge">
-            旋轉 / 取出：預覽單一檔案。合併：預覽已合併好的結果。
+            旋轉 / 取出：預覽目前設定後的結果。合併：預覽已合併好的結果。
           </span>
         </div>
         <canvas id="previewCanvas"></canvas>
@@ -350,7 +350,6 @@
   </div>
 
   <script>
-    // PDF.js worker 設定 [web:41]
     pdfjsLib.GlobalWorkerOptions.workerSrc = "./pdf.worker.min.js";
 
     // DOM
@@ -383,18 +382,20 @@
 
     // 狀態
     let currentTool = 'rotate';           // rotate | extract | merge
-    let pdfDocForPreview = null;          // PDF.js document
-    let originalPdfBytes = null;          // 單一檔操作用 bytes
-    let mergedPreviewBytes = null;        // 合併結果 bytes（預覽＋下載）
+    let pdfDocForPreview = null;          // 給 pdf.js 用的文件
+    let originalPdfBytes = null;          // 單一檔「原始檔」 bytes（旋轉 / 取出的基準）
+    let mergedPreviewBytes = null;        // 合併結果 bytes
+    let previewRotatedBytes = null;       // 旋轉預覽結果
+    let previewExtractedBytes = null;     // 取出預覽結果
     let currentPageNum = 1;
-    let totalPages = 0;
+    let totalPages = 0;                   // 只記錄原始檔的頁數
 
-    // 合併來源檔案（File 陣列）
+    // 合併來源檔案
     let mergeFiles = [];
-    let singleSourceName = '';            // 單一檔：原始檔名（不含副檔名）
-    let mergeBaseName = '';               // 合併：以第一個檔名為 base
+    let singleSourceName = '';
+    let mergeBaseName = '';
 
-    // 工具切換
+    // 切換工具
     toolTabs.forEach(btn => {
       btn.addEventListener('click', () => {
         const tool = btn.getAttribute('data-tool');
@@ -443,13 +444,15 @@
     function updateRunButtonState() {
       if (currentTool === 'merge') {
         runActionBtn.disabled = !mergedPreviewBytes;
+      } else if (currentTool === 'rotate') {
+        runActionBtn.disabled = !originalPdfBytes && !previewRotatedBytes;
       } else {
-        runActionBtn.disabled = !originalPdfBytes;
+        runActionBtn.disabled = !originalPdfBytes && !previewExtractedBytes;
       }
     }
 
-    // 共用：用 bytes 建立預覽
-    async function loadPreviewFromBytes(bytes) {
+    // 用 bytes 建立預覽；updatePageInfoOnlyForOriginal = 是否更新 totalPages
+    async function loadPreviewFromBytes(bytes, updatePageInfoOnlyForOriginal = false) {
       if (!bytes) {
         pdfDocForPreview = null;
         resetPreview();
@@ -463,7 +466,10 @@
 
       try {
         pdfDocForPreview = await pdfjsLib.getDocument({ data: previewBytes }).promise;
-        totalPages = pdfDocForPreview.numPages;
+        // 只有在載入「原始檔」時才更新 totalPages
+        if (updatePageInfoOnlyForOriginal) {
+          totalPages = pdfDocForPreview.numPages;
+        }
         currentPageNum = 1;
         prevPageBtn.disabled = false;
         nextPageBtn.disabled = false;
@@ -478,10 +484,14 @@
       updateRunButtonState();
     }
 
-    // 單一檔案：載入 + 記錄檔名
+    // 載入單一檔案，設定 originalPdfBytes 與 totalPages
     fileInput.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       singleFileName.textContent = file ? file.name : '尚未選擇檔案';
+
+      previewRotatedBytes = null;
+      previewExtractedBytes = null;
+      mergedPreviewBytes = null;
 
       if (!file) {
         originalPdfBytes = null;
@@ -497,8 +507,8 @@
 
       const buffer = await file.arrayBuffer();
       originalPdfBytes = new Uint8Array(buffer);
-      mergedPreviewBytes = null;
-      await loadPreviewFromBytes(originalPdfBytes);
+      // 載入原始檔到預覽，並更新 totalPages
+      await loadPreviewFromBytes(originalPdfBytes, true);
     });
 
     function resetPreview() {
@@ -522,9 +532,9 @@
       const renderContext = { canvasContext: ctx, viewport };
       await page.render(renderContext).promise;
 
-      pageInfo.textContent = `第 ${currentPageNum} / ${totalPages} 頁`;
+      pageInfo.textContent = `第 ${currentPageNum} / ${pdfDocForPreview.numPages} 頁`;
       prevPageBtn.disabled = currentPageNum <= 1;
-      nextPageBtn.disabled = currentPageNum >= totalPages;
+      nextPageBtn.disabled = currentPageNum >= pdfDocForPreview.numPages;
     }
 
     prevPageBtn.addEventListener('click', () => {
@@ -534,12 +544,12 @@
     });
 
     nextPageBtn.addEventListener('click', () => {
-      if (!pdfDocForPreview || currentPageNum >= totalPages) return;
+      if (!pdfDocForPreview || currentPageNum >= pdfDocForPreview.numPages) return;
       currentPageNum++;
       renderPreviewPage();
     });
 
-    // 渲染合併清單 UI
+    // 合併清單 UI
     function renderMergeList() {
       mergeFileList.innerHTML = '';
       if (!mergeFiles.length) {
@@ -562,7 +572,6 @@
         btn.textContent = '✕';
         btn.title = '從清單中移除';
         btn.addEventListener('click', async () => {
-          // 從陣列移除這個檔案
           mergeFiles.splice(index, 1);
           await recomputeMergePreview();
           renderMergeList();
@@ -574,7 +583,7 @@
       });
     }
 
-    // 重新合併 mergeFiles → mergedPreviewBytes → 更新預覽
+    // 合併多檔：重算 mergedPreviewBytes 並預覽
     async function recomputeMergePreview() {
       if (!mergeFiles.length) {
         mergedPreviewBytes = null;
@@ -584,7 +593,6 @@
         return;
       }
 
-      // 以第一個檔名為 base
       const firstName = mergeFiles[0].name || '';
       mergeBaseName = firstName.endsWith('.pdf')
         ? firstName.slice(0, -4)
@@ -603,8 +611,7 @@
         }
 
         mergedPreviewBytes = await mergedPdf.save();
-        originalPdfBytes = null;
-        await loadPreviewFromBytes(mergedPreviewBytes);
+        await loadPreviewFromBytes(mergedPreviewBytes, false);
       } catch (err) {
         console.error(err);
         alert('合併預覽時發生錯誤，請檢查 console。');
@@ -615,20 +622,18 @@
       updateRunButtonState();
     }
 
-    // 多檔合併：選檔（追加到陣列） [web:86][web:88]
     mergeFileInput.addEventListener('change', async (e) => {
       const newFiles = Array.from(e.target.files || []);
       if (newFiles.length) {
         mergeFiles = mergeFiles.concat(newFiles);
       }
-      // 清掉 input 的值，避免同一批檔案無法再次選取
       mergeFileInput.value = '';
 
       await recomputeMergePreview();
       renderMergeList();
     });
 
-    // 解析頁碼字串（1-based）
+    // 解析頁碼字串（1-based，針對原始 totalPages）
     function parsePageNumbers(inputStr, maxPage) {
       if (!inputStr || !inputStr.trim()) {
         const all = [];
@@ -646,6 +651,96 @@
       return Array.from(new Set(result)).sort((a, b) => a - b);
     }
 
+    // 旋轉預覽：每次從 originalPdfBytes 重算
+    async function previewRotate() {
+      if (!originalPdfBytes || !totalPages) return;
+
+      const pagesToRotate = parsePageNumbers(rotatePagesInput.value, totalPages);
+      if (!pagesToRotate.length) {
+        previewRotatedBytes = null;
+        await loadPreviewFromBytes(originalPdfBytes, false);
+        updateRunButtonState();
+        return;
+      }
+
+      const rotationDelta = parseInt(rotationSelect.value, 10);
+
+      try {
+        const pdfDoc = await PDFLib.PDFDocument.load(originalPdfBytes);
+        const pages = pdfDoc.getPages();
+        const total = pages.length;
+
+        pagesToRotate.forEach((pageNum1based) => {
+          const index = pageNum1based - 1;
+          if (index < 0 || index >= total) return;
+          const page = pages[index];
+          const currentRotation = page.getRotation().angle || 0;
+          let newRotation = (currentRotation + rotationDelta) % 360;
+          if (newRotation < 0) newRotation += 360;
+          page.setRotation(PDFLib.degrees(newRotation));
+        });
+
+        previewRotatedBytes = await pdfDoc.save();
+        previewExtractedBytes = null;
+        await loadPreviewFromBytes(previewRotatedBytes, false);
+        updateRunButtonState();
+      } catch (err) {
+        console.error(err);
+        alert('產生旋轉預覽時發生錯誤，請檢查 console。');
+        previewRotatedBytes = null;
+        await loadPreviewFromBytes(originalPdfBytes, false);
+        updateRunButtonState();
+      }
+    }
+
+    // 取出預覽：每次都從 originalPdfBytes 重算，totalPages 只看原檔
+    async function previewExtract() {
+      if (!originalPdfBytes || !totalPages) return;
+
+      const pagesToKeep = parsePageNumbers(extractPagesInput.value, totalPages);
+      if (!pagesToKeep.length) {
+        previewExtractedBytes = null;
+        await loadPreviewFromBytes(originalPdfBytes, false);
+        updateRunButtonState();
+        return;
+      }
+
+      try {
+        const srcPdf = await PDFLib.PDFDocument.load(originalPdfBytes);
+        const newPdf = await PDFLib.PDFDocument.create();
+
+        const indices = pagesToKeep.map(n => n - 1);
+        const copiedPages = await newPdf.copyPages(srcPdf, indices);
+        copiedPages.forEach(p => newPdf.addPage(p));
+
+        previewExtractedBytes = await newPdf.save();
+        previewRotatedBytes = null;
+        await loadPreviewFromBytes(previewExtractedBytes, false);
+        updateRunButtonState();
+      } catch (err) {
+        console.error(err);
+        alert('產生取出預覽時發生錯誤，請檢查 console。');
+        previewExtractedBytes = null;
+        await loadPreviewFromBytes(originalPdfBytes, false);
+        updateRunButtonState();
+      }
+    }
+
+    rotatePagesInput.addEventListener('input', async () => {
+      if (!originalPdfBytes) return;
+      await previewRotate();
+    });
+
+    rotationSelect.addEventListener('change', async () => {
+      if (!originalPdfBytes) return;
+      await previewRotate();
+    });
+
+    extractPagesInput.addEventListener('input', async () => {
+      if (!originalPdfBytes) return;
+      await previewExtract();
+    });
+
     // 建檔名：[原檔名]_[action].pdf
     function buildFileName(action) {
       if (currentTool === 'merge') {
@@ -656,7 +751,6 @@
       return `${base}_${action}.pdf`;
     }
 
-    // 主按鈕
     runActionBtn.addEventListener('click', async () => {
       if (currentTool === 'rotate') {
         await doRotate();
@@ -667,9 +761,14 @@
       }
     });
 
-    // 旋轉
+    // 旋轉（下載）
     async function doRotate() {
-      if (!originalPdfBytes) return;
+      if (!originalPdfBytes && !previewRotatedBytes) return;
+
+      if (previewRotatedBytes) {
+        triggerDownload(previewRotatedBytes, buildFileName('rotated'));
+        return;
+      }
 
       const pagesToRotate = parsePageNumbers(rotatePagesInput.value, totalPages);
       if (!pagesToRotate.length) {
@@ -701,9 +800,14 @@
       }
     }
 
-    // 取出
+    // 取出（下載）
     async function doExtract() {
-      if (!originalPdfBytes) return;
+      if (!originalPdfBytes && !previewExtractedBytes) return;
+
+      if (previewExtractedBytes) {
+        triggerDownload(previewExtractedBytes, buildFileName('extracted'));
+        return;
+      }
 
       const pagesToKeep = parsePageNumbers(extractPagesInput.value, totalPages);
       if (!pagesToKeep.length) {
@@ -727,7 +831,6 @@
       }
     }
 
-    // 合併下載（使用 mergedPreviewBytes）
     async function doMergeDownload() {
       if (!mergedPreviewBytes) return;
       triggerDownload(mergedPreviewBytes, buildFileName('merged'));
@@ -745,7 +848,6 @@
       URL.revokeObjectURL(url);
     }
 
-    // 初始化
     updateToolUI();
   </script>
 </body>
