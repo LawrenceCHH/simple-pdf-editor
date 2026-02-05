@@ -688,20 +688,64 @@
 
     // 解析頁碼字串（1-based，針對原始 totalPages）
     function parsePageNumbers(inputStr, maxPage) {
+      if (!maxPage || maxPage < 1) return [];
+
+      // input 為空 => 代表全部
       if (!inputStr || !inputStr.trim()) {
         const all = [];
         for (let i = 1; i <= maxPage; i++) all.push(i);
         return all;
       }
+
+      const result = new Set();
+
+      // 用逗號切開每一段
       const parts = inputStr.split(',');
-      const result = [];
-      for (const p of parts) {
-        const n = parseInt(p.trim(), 10);
-        if (!Number.isNaN(n) && n >= 1 && n <= maxPage) {
-          result.push(n);
+      for (let raw of parts) {
+        const part = raw.trim();
+        if (!part) continue;
+
+        // 區間：a-b
+        if (part.includes('-')) {
+          const [startStr, endStr] = part.split('-').map(s => s.trim());
+          let start = parseInt(startStr, 10);
+          let end = parseInt(endStr, 10);
+
+          if (
+            Number.isNaN(start) ||
+            Number.isNaN(end)
+          ) {
+            continue; // 無效的區間，略過
+          }
+
+          // 允許使用者寫「高到低」，例如 10-5，自動 swap
+          if (start > end) {
+            const tmp = start;
+            start = end;
+            end = tmp;
+          }
+
+          // 邊界修正在 1..maxPage 之內
+          if (end < 1 || start > maxPage) {
+            continue; // 完全超出範圍
+          }
+          if (start < 1) start = 1;
+          if (end > maxPage) end = maxPage;
+
+          for (let p = start; p <= end; p++) {
+            result.add(p);
+          }
+        } else {
+          // 單一頁碼
+          const n = parseInt(part, 10);
+          if (!Number.isNaN(n) && n >= 1 && n <= maxPage) {
+            result.add(n);
+          }
         }
       }
-      return Array.from(new Set(result)).sort((a, b) => a - b);
+
+      // 輸出排序好的陣列
+      return Array.from(result).sort((a, b) => a - b);
     }
 
     // 旋轉預覽：每次從 originalPdfBytes 重算
